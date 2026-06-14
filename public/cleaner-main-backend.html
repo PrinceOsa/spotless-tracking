@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spotless Tracking - Cleaner (Main Backend)</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      padding: 30px;
+    }
+    h1 {
+      color: #001e30;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    .status-group {
+      margin-bottom: 25px;
+      padding: 15px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border-left: 4px solid #006493;
+    }
+    .status-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    .status-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: #001e30;
+    }
+    .status-value.ready {
+      color: #28a745;
+    }
+    .status-value.error {
+      color: #dc3545;
+    }
+    .location-display {
+      background: linear-gradient(135deg, #006493 0%, #004b70 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 25px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .location-display .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.9;
+      margin-bottom: 8px;
+    }
+    .location-display .value {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 25px;
+    }
+    button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #006493;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #004b70;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 100, 147, 0.3);
+    }
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-secondary {
+      background: #f2f4f7;
+      color: #3e4850;
+    }
+    .btn-secondary:hover {
+      background: #e0e2e6;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-top: 25px;
+      padding-top: 25px;
+      border-top: 1px solid #e0e0e0;
+    }
+    .stat-item {
+      text-align: center;
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 6px;
+    }
+    .stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #001e30;
+    }
+    .alert {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
+    .alert-info {
+      background: #e3f2fd;
+      color: #1976d2;
+      border-left: 3px solid #1976d2;
+    }
+    .alert-error {
+      background: #f8d7da;
+      color: #721c24;
+      border-left: 3px solid #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📍 Spotless Tracker</h1>
+    <p class="subtitle">Cleaner Location Broadcaster (Main Backend)</p>
+
+    <div class="alert alert-info">
+      <strong>Integration Test:</strong> This page broadcasts location to the main SpotlessDoc backend.
+      Use with customer.html dashboard to see live location updates.
+    </div>
+
+    <div class="status-group">
+      <div class="status-label">Backend Connection</div>
+      <div class="status-value" id="connStatus">Connecting...</div>
+    </div>
+
+    <div class="status-group">
+      <div class="status-label">Booking ID</div>
+      <div class="status-value" id="bookingId">—</div>
+    </div>
+
+    <div class="status-group">
+      <div class="status-label">Auth Token</div>
+      <div class="status-value" id="tokenStatus">—</div>
+    </div>
+
+    <div class="alert alert-error" id="errorAlert" style="display: none;">
+      <span id="errorMessage"></span>
+    </div>
+
+    <div class="location-display" id="locationDisplay">
+      <div class="label">Current Location</div>
+      <div class="value" id="locValue">Click "Start Sharing" to begin</div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-primary" id="startBtn" onclick="startTracking()">Start Sharing</button>
+      <button class="btn-secondary" id="stopBtn" onclick="stopTracking()" disabled>Stop Sharing</button>
+    </div>
+
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-label">Updates Sent</div>
+        <div class="stat-value" id="updateCount">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Last Update</div>
+        <div class="stat-value" id="lastUpdate">—</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let watchId = null;
+    let lastEmitTime = 0;
+    let updateCount = 0;
+    const THROTTLE_INTERVAL = 4000; // 4 seconds
+
+    // Get params from URL
+    const params = new URLSearchParams(window.location.search);
+    const bookingId = params.get('booking') || 'unknown';
+    const token = params.get('token') || localStorage.getItem('token');
+
+    document.getElementById('bookingId').textContent = bookingId;
+    document.getElementById('tokenStatus').textContent = token ? 'Present' : 'Missing (provide ?token=xxx)';
+
+    // Connect to main backend WebSocket
+    function connectWebSocket() {
+      if (!token) {
+        showError('No auth token. Provide ?token=YOUR_JWT or set localStorage.token');
+        return;
+      }
+
+      const wsUrl = (new URL(window.location.href).searchParams.get('wsUrl')
+        || localStorage.getItem('wsUrl')
+        || 'ws://localhost:3001');
+
+      console.log(`Connecting to ${wsUrl}/ws...`);
+      ws = new WebSocket(`${wsUrl}/ws?token=${encodeURIComponent(token)}`);
+
+      ws.onopen = () => {
+        console.log('✓ Connected to main backend');
+        updateConnStatus('Connected', 'ready');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'CONNECTED') {
+            console.log(`✓ Auth successful: ${msg.payload.userId}`);
+          } else if (msg.type === 'PING') {
+            ws.send(JSON.stringify({ type: 'PONG', messageId: msg.messageId }));
+          }
+        } catch (err) {
+          console.error('Message parse error:', err);
+        }
+      };
+
+      ws.onerror = (event) => {
+        console.error('WebSocket error:', event);
+        showError('WebSocket connection error');
+        updateConnStatus('Error', 'error');
+      };
+
+      ws.onclose = () => {
+        console.log('Disconnected from backend');
+        updateConnStatus('Disconnected', 'error');
+        ws = null;
+      };
+    }
+
+    function updateConnStatus(text, cls) {
+      const el = document.getElementById('connStatus');
+      el.textContent = text;
+      el.className = 'status-value ' + (cls || '');
+    }
+
+    function showError(msg) {
+      const alert = document.getElementById('errorAlert');
+      document.getElementById('errorMessage').textContent = msg;
+      alert.style.display = 'block';
+      setTimeout(() => { alert.style.display = 'none'; }, 5000);
+    }
+
+    function startTracking() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        showError('WebSocket not connected. Reload page.');
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        showError('Geolocation not supported');
+        return;
+      }
+
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+
+      const options = {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 10000,
+      };
+
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude, heading, accuracy } = position.coords;
+          const locStr = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+          document.getElementById('locValue').textContent = locStr;
+          document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+          // Throttle emit to every 4 seconds
+          const now = Date.now();
+          if (now - lastEmitTime >= THROTTLE_INTERVAL && ws && ws.readyState === WebSocket.OPEN) {
+            lastEmitTime = now;
+            ws.send(JSON.stringify({
+              type: 'CLEANER_LOCATION_UPDATE',
+              messageId: Math.random().toString(36).substring(7),
+              timestamp: new Date().toISOString(),
+              payload: {
+                bookingId: Number(bookingId),
+                lat: latitude,
+                lng: longitude,
+                heading: heading,
+                accuracy: accuracy,
+                ts: new Date().toISOString(),
+              },
+            }));
+            updateCount++;
+            document.getElementById('updateCount').textContent = updateCount;
+            console.log(`📤 Location sent (${locStr})`);
+          }
+        },
+        (error) => {
+          console.error('Geolocation error:', error);
+          if (error.code === error.PERMISSION_DENIED) {
+            showError('Location permission denied');
+          }
+          stopTracking();
+        },
+        options,
+      );
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    // Connect on load
+    window.addEventListener('load', () => {
+      connectWebSocket();
+    });
+  </script>
+</body>
+</html>
