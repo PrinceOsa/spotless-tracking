@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spotless Tracking - Customer</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .header {
+      background: white;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      border-bottom: 1px solid #e0e0e0;
+    }
+    h1 {
+      color: #001e30;
+      margin-bottom: 8px;
+      font-size: 24px;
+    }
+    .header-subtitle {
+      color: #666;
+      font-size: 13px;
+    }
+    .info-panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 15px;
+    }
+    .info-panel {
+      background: #f9f9f9;
+      padding: 12px;
+      border-radius: 8px;
+      border-left: 3px solid #006493;
+    }
+    .info-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      margin-bottom: 6px;
+    }
+    .info-value {
+      font-size: 15px;
+      font-weight: 600;
+      color: #001e30;
+    }
+    .info-value.waiting {
+      color: #ff8c00;
+    }
+    .info-value.ready {
+      color: #28a745;
+    }
+    .map-container {
+      flex: 1;
+      position: relative;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    .map-controls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 400;
+    }
+    button {
+      background: white;
+      border: 1px solid #ddd;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      transition: all 0.2s;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    button:hover {
+      background: #f5f5f5;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    }
+    .popup-content {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #333;
+    }
+    .popup-content strong {
+      color: #001e30;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .popup-content .detail {
+      margin: 4px 0;
+    }
+    .distance {
+      font-size: 12px;
+      color: #999;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #e0e0e0;
+    }
+    @media (max-width: 600px) {
+      .header {
+        padding: 15px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      .info-panels {
+        gap: 10px;
+      }
+      .info-panel {
+        padding: 10px;
+      }
+      .map-controls {
+        bottom: 10px;
+        right: 10px;
+        gap: 8px;
+      }
+      button {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📍 Spotless Tracker</h1>
+      <p class="header-subtitle">Track Your Cleaner's Live Location</p>
+      <div class="info-panels">
+        <div class="info-panel">
+          <div class="info-label">Booking ID</div>
+          <div class="info-value" id="bookingId">—</div>
+        </div>
+        <div class="info-panel">
+          <div class="info-label">Connection Status</div>
+          <div class="info-value" id="connStatus">Connecting...</div>
+        </div>
+        <div class="info-panel">
+          <div class="info-label">Cleaner Location</div>
+          <div class="info-value" id="locStatus">Waiting...</div>
+        </div>
+        <div class="info-panel">
+          <div class="info-label">Last Update</div>
+          <div class="info-value" id="lastUpdateTime">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="map-container">
+      <div id="map"></div>
+      <div class="map-controls">
+        <button onclick="centerMap()">Center Map</button>
+        <button onclick="toggleFollowMode()" id="followBtn">Follow On</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    const socket = io();
+    const params = new URLSearchParams(window.location.search);
+    const bookingId = params.get('booking') || 'unknown';
+    let map = null;
+    let cleanerMarker = null;
+    let lastLocation = null;
+    let followMode = true;
+    let userLocation = null;
+
+    // Initialize
+    document.getElementById('bookingId').textContent = bookingId;
+
+    // Map setup
+    function initMap() {
+      map = L.map('map').setView([40.7128, -74.006], 13); // Default NYC
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map);
+    }
+
+    // Socket.IO events
+    socket.on('connect', () => {
+      console.log('✓ Connected to server');
+      updateConnStatus('Connected', 'ready');
+      socket.emit('join-room', bookingId);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('✗ Disconnected from server');
+      updateConnStatus('Disconnected', 'error');
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('Connection error:', err);
+      updateConnStatus(`Error: ${err.message}`, 'error');
+    });
+
+    socket.on('location-update', (data) => {
+      console.log('📍 Location update:', data);
+
+      if (data.message) {
+        console.log(data.message);
+        updateLocStatus(data.message, 'waiting');
+        return;
+      }
+
+      if (!data.lat || !data.lng) {
+        console.warn('Invalid location data:', data);
+        return;
+      }
+
+      lastLocation = data;
+      userLocation = [data.lat, data.lng];
+
+      // Update UI
+      const locStr = `${data.lat.toFixed(6)}, ${data.lng.toFixed(6)}`;
+      updateLocStatus(locStr, 'ready');
+      document.getElementById('lastUpdateTime').textContent = new Date(data.ts).toLocaleTimeString();
+
+      // Update map
+      if (!cleanerMarker) {
+        cleanerMarker = L.marker(userLocation, {
+          title: 'Cleaner Location',
+          icon: L.icon({
+            iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI3IiBmaWxsPSIjMDA2NDkzIi8+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwNjQ5MyIgc3Ryb2tlLXdpZHRoPSIyIiBvcGFjaXR5PSIwLjMiLz48L3N2Zz4=',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        }).addTo(map);
+      } else {
+        cleanerMarker.setLatLng(userLocation);
+      }
+
+      // Add popup
+      const heading = data.heading !== null ? `${Math.round(data.heading)}°` : '—';
+      const accuracy = data.accuracy !== null ? `±${Math.round(data.accuracy)}m` : '—';
+      cleanerMarker.bindPopup(`
+        <div class="popup-content">
+          <strong>Cleaner Location</strong>
+          <div class="detail"><strong>Coordinates:</strong> ${locStr}</div>
+          <div class="detail"><strong>Heading:</strong> ${heading}</div>
+          <div class="detail"><strong>Accuracy:</strong> ${accuracy}</div>
+          <div class="distance"><strong>Last Update:</strong> ${new Date(data.ts).toLocaleTimeString()}</div>
+        </div>
+      `);
+
+      // Center on location if follow mode is on
+      if (followMode && map) {
+        map.setView(userLocation, map.getZoom());
+      }
+    });
+
+    function updateConnStatus(text, cls) {
+      const el = document.getElementById('connStatus');
+      el.textContent = text;
+      el.className = 'info-value ' + (cls || '');
+    }
+
+    function updateLocStatus(text, cls) {
+      const el = document.getElementById('locStatus');
+      el.textContent = text;
+      el.className = 'info-value ' + (cls || '');
+    }
+
+    function centerMap() {
+      if (userLocation && map) {
+        map.setView(userLocation, Math.max(map.getZoom(), 15));
+      }
+    }
+
+    function toggleFollowMode() {
+      followMode = !followMode;
+      const btn = document.getElementById('followBtn');
+      btn.textContent = followMode ? 'Follow On' : 'Follow Off';
+      if (followMode && userLocation) {
+        centerMap();
+      }
+    }
+
+    // Initialize on page load
+    window.addEventListener('load', () => {
+      console.log('Page loaded. Initializing map...');
+      initMap();
+    });
+  </script>
+</body>
+</html>
