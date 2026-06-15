@@ -98,7 +98,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 httpServer.listen(PORT, () => {
   console.log(`\n🚀 Spotless Tracking POC server running on http://localhost:${PORT}`);
   console.log(`📱 Cleaner: http://localhost:${PORT}/cleaner.html?booking=123`);
