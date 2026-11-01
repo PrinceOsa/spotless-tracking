@@ -209,3 +209,141 @@ Output:
 **Created**: 2026-06-14  
 **Purpose**: MVP launch prerequisite (real-time cleaner tracking)  
 **Status**: Ready for testing
+
+---
+
+## Geo Service (`/api/geo/*`)
+
+OSM-backed geocoding, reverse, autocomplete, directions, and distance matrix.
+Mounted as routes on this same server — no separate microservice — under the
+`geo/` module. Designed so the geo capability can be lifted into the main
+Spotless Doc backend with no code changes (cache swaps for Redis, providers
+swap via env, error shapes are already provider-agnostic).
+
+### Provider strategy
+
+| Capability                  | Provider  | Why                                                       |
+|-----------------------------|-----------|-----------------------------------------------------------|
+| Geocode / reverse           | Nominatim | The OSM standard for full-address lookup                  |
+| Autocomplete                | **Photon**| Purpose-built for typeahead. Nominatim is NOT suitable    |
+| Directions / Distance Matrix| OSRM      | `/route` + `/table`, free, no API key                     |
+
+> **Production warning.** The defaults in `.env.example` point at the public
+> demo endpoints (`nominatim.openstreetmap.org`, `photon.komoot.io`,
+> `router.project-osrm.org`). Those have strict usage policies — Nominatim is
+> ~1 req/sec and bans heavy commercial use — and will block a marketplace's
+> traffic. **Before production, point each `*_BASE_URL` env var at a
+> self-hosted instance** (Docker images exist for all three) **or a paid OSM
+> host.** Because every provider URL is an env var, the swap is config-only.
+
+> Note: provider APIs and rate-limit policies change. Verify each project's
+> current docs before finalizing self-hosted deployments.
+
+### Endpoints
+
+| Method | Route                        | Purpose                            |
+|--------|------------------------------|------------------------------------|
+| GET    | `/api/geo/geocode`           | address → coords                   |
+| GET    | `/api/geo/reverse`           | coords → address                   |
+| POST   | `/api/geo/distance-matrix`   | ETAs/distances 1 origin → N points |
+| POST   | `/api/geo/directions`        | route between two points           |
+| GET    | `/api/geo/autocomplete`      | typeahead suggestions              |
+
+### Normalized response shapes
+
+All providers are flattened into a stable JSON shape so the frontend never
+sees Nominatim/Photon/OSRM keys directly:
+
+**`GET /geocode?q=...`**
+```json
+{ "lat": 33.02, "lng": -96.69, "displayName": "...", "confidence": 0.83 }
+```
+
+**`GET /reverse?lat=..&lng=..`**
+```json
+{
+  "lat": 33.02, "lng": -96.69,
+  "displayName": "...",
+  "address": { "road": "...", "city": "Plano", "state": "Texas", "postcode": "75024", "country": "United States" }
+}
+```
+
+**`GET /autocomplete?q=..&lat=..&lng=..`** *(lat/lng optional, bias only)*
+```json
+{
+  "suggestions": [
+    { "lat": 33.02, "lng": -96.69, "displayName": "1234 Main St, Plano, Texas", "primary": "1234 Main St", "secondary": "Plano, Texas" }
+  ]
+}
+```
+
+**`POST /directions`**  body `{ origin: {lat,lng}, destination: {lat,lng} }`
+```json
+{
+  "origin": {...}, "destination": {...},
+  "distanceM": 12345.6, "durationSec": 982.4,
+  "geometry": { "type": "LineString", "coordinates": [[lng,lat], ...] }
+}
+```
+
+**`POST /distance-matrix`**  body `{ origin: {lat,lng}, destinations: [{lat,lng}, ...] }`
+```json
+{
+  "origin": {...},
+  "results": [
+    { "destination": {...}, "distanceM": 4321.0, "durationSec": 412.0, "status": "ok" }
+  ]
+}
+```
+
+### Errors
+
+| Status | When                                                                     |
+|--------|--------------------------------------------------------------------------|
+| 400    | Bad/missing params (lat out of range, empty q, too many destinations)    |
+| 404    | No geocoding match / no route                                            |
+| 429    | Per-IP rate limit exceeded (see `GEO_RATE_LIMIT_*` env vars)             |
+| 502    | Upstream provider returned a non-2xx                                     |
+| 504    | Upstream provider timed out (configurable via `GEO_REQUEST_TIMEOUT_MS`)  |
+
+Stack traces are never sent back; the body is always `{ "error": "..." }`.
+
+### Frontend notes
+
+- **Debounce autocomplete on the client by ~300ms.** Photon is fine with
+  bursts but this saves bandwidth and round-trips. The backend also caches
+  identical queries for 24h.
+- **Coordinate order:** the API takes and returns `{lat, lng}` everywhere.
+  OSRM's `lng,lat` URL ordering is handled internally — frontend code does
+  not need to know.
+- **Directions geometry** is GeoJSON `LineString` with `[lng, lat]` pairs,
+  ready to pass straight to MapLibre/Leaflet as a polyline.
+
+### Caching & rate limits
+
+- Geocode + reverse: 30-day TTL (addresses don't move).
+- Autocomplete: 1-day TTL, keyed by normalized query plus bias lat/lng.
+- Directions + matrix: 5-minute TTL (OSRM is traffic-free; longer is safe).
+- Storage is in-process LRU. Move to Redis when consolidating into the main
+  backend — `geo/geo.cache.js` exposes a deliberately small API so the swap
+  is one file.
+- Per-IP limits via `express-rate-limit`, with autocomplete on its own
+  higher-budget bucket. All overridable via env.
+
+### Nginx reverse proxy
+
+The geo routes ride on the existing app port — no Nginx changes needed for
+the routes themselves. **Only** if you stand up self-hosted Nominatim / OSRM
+/ Photon containers on the same droplet, add internal `location` blocks for
+their ports so they're not exposed publicly, then point the `*_BASE_URL` env
+vars at `http://127.0.0.1:<port>`.
+
+### Tests
+
+```bash
+npm test
+```
+
+Tests mock `global.fetch` — no real network calls — and cover geocode,
+reverse, distance matrix (including the lng/lat URL flip), directions,
+autocomplete, and cache hit/miss behaviour.

@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import geoRoutes from './geo/geo.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,6 +85,10 @@ io.on('connection', (socket) => {
     console.log(`[Socket] Client disconnected: ${socket.id}`);
   });
 });
+
+// Geo service — OSM-backed geocoding, reverse, autocomplete, directions, matrix.
+// See geo/ README section for provider strategy + self-host requirement in prod.
+app.use('/api/geo', geoRoutes);
 
 // REST endpoint to clear location (for testing)
 app.post('/api/clear/:bookingId', (req, res) => {

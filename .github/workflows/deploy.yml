@@ -1,0 +1,83 @@
+name: Deploy (manual)
+
+# Manually-triggered deploy of the tracking POC + /api/geo service to
+# tracking.spotlessdoc.com. Same pattern as the main backend's deploy
+# workflow — drives scripts/deploy.sh so CI and laptop behave identically.
+#
+# One-time setup: see .github/DEPLOY_SETUP.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a tracking deploy'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-tracking
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Geo service tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run geo tests
+        run: npm test
+
+  deploy:
+    name: Ship to droplet
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Guard against accidental triggers
+        if: ${{ github.event.inputs.confirm != 'deploy' }}
+        run: |
+          echo "::error::Input 'confirm' must be the word 'deploy' to proceed."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH for the droplet
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          if [ -n "${DEPLOY_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 644 ~/.ssh/known_hosts
+          else
+            echo "::warning::DEPLOY_KNOWN_HOSTS not set — using accept-new."
+            printf 'Host *\n  StrictHostKeyChecking accept-new\n' > ~/.ssh/config
+            chmod 600 ~/.ssh/config
+          fi
+          echo "DROPLET=${DEPLOY_HOST:-root@68.183.130.208}" >> "$GITHUB_ENV"
+
+      - name: Run scripts/deploy.sh
+        env:
+          DROPLET: ${{ env.DROPLET }}
+        run: |
+          chmod +x scripts/deploy.sh
+          bash scripts/deploy.sh
+
+      - name: Post-deploy verification
+        run: |
+          # /health is plain ok; also sanity-check one geo endpoint
+          curl -fsS https://tracking.spotlessdoc.com/health | grep -q '"ok"'
+          curl -fsS 'https://tracking.spotlessdoc.com/api/geo/geocode?q=plano+tx' | grep -q '"lat"'
